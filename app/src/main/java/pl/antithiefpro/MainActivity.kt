@@ -415,7 +415,7 @@ class MainActivity : Activity() {
                 val capture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                     .build()
-                provider.bindToLifecycle(lifecycleOwner = this, cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA, useCases = *arrayOf(capture))
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, capture)
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, "AntiThiefPRO_photo_${System.currentTimeMillis()}.jpg")
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -448,7 +448,7 @@ class MainActivity : Activity() {
                     .setQualitySelector(QualitySelector.from(Quality.HD))
                     .build()
                 val videoCapture = VideoCapture.withOutput(recorder)
-                provider.bindToLifecycle(lifecycleOwner = this, cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA, useCases = *arrayOf(videoCapture))
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, videoCapture)
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, "AntiThiefPRO_video_${System.currentTimeMillis()}.mp4")
                     put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
