@@ -3,6 +3,9 @@ package pl.antithiefpro
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
+import android.content.Intent
+import android.net.ConnectivityManager
+import android.os.StatFs
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -51,6 +54,8 @@ class MainActivity : Activity(), SensorEventListener {
     private var soundEnabled = true
     private var vibrationEnabled = true
     private var lastTrigger = 0L
+    private var pendingCsv = ""
+    private val exportRequestCode = 9012
 
     private val countdownTask = object : Runnable {
         override fun run() {
@@ -65,6 +70,7 @@ class MainActivity : Activity(), SensorEventListener {
                 ignoreMotionUntil = System.currentTimeMillis() + 700L
                 sensorManager.registerListener(this@MainActivity, accelerometer, SensorManager.SENSOR_DELAY_GAME)
                 updateStatus("UZBROJONY", AMBER)
+                EventLog.add(this@MainActivity, "ARMED", "Alarm ruchowy uzbrojony")
                 armButton.text = "ALARM UZBROJONY"
                 Toast.makeText(this@MainActivity, "Alarm uzbrojony. Nie ruszaj telefonu.", Toast.LENGTH_SHORT).show()
             }
@@ -91,6 +97,7 @@ class MainActivity : Activity(), SensorEventListener {
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         tone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
         buildUi()
+        EventLog.add(this, "APP_START", "Otwarto AntiThiefPRO")
         updateStatus("ROZBROJONY", GREEN)
     }
 
@@ -206,6 +213,7 @@ class MainActivity : Activity(), SensorEventListener {
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     sensitivity = 1.5f + progress * 0.1f
+                    if (fromUser) EventLog.add(this@MainActivity, "SETTING", "Zmieniono czułość czujnika")
                     sensitivityText.text = String.format(java.util.Locale.US, "%.1f", sensitivity)
                     getSharedPreferences("anti_thief", MODE_PRIVATE).edit().putFloat("sensitivity", sensitivity).apply()
                 }
@@ -216,10 +224,12 @@ class MainActivity : Activity(), SensorEventListener {
         settings.addView(seek)
         settings.addView(makeSwitch("Dźwięk alarmu", "Głośny sygnał po wykryciu ruchu", soundEnabled) {
             soundEnabled = it
+            EventLog.add(this@MainActivity, "SETTING", "Dźwięk alarmu: " + if (it) "włączony" else "wyłączony")
             getSharedPreferences("anti_thief", MODE_PRIVATE).edit().putBoolean("sound", it).apply()
         })
         settings.addView(makeSwitch("Wibracje", "Wibracje razem z alarmem", vibrationEnabled) {
             vibrationEnabled = it
+            EventLog.add(this@MainActivity, "SETTING", "Wibracje: " + if (it) "włączone" else "wyłączone")
             getSharedPreferences("anti_thief", MODE_PRIVATE).edit().putBoolean("vibration", it).apply()
         })
         page.addView(settings, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
@@ -232,6 +242,34 @@ class MainActivity : Activity(), SensorEventListener {
             setOnClickListener { changePin() }
         }
         page.addView(pinButton, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(12) })
+
+        val historyButton = Button(this).apply {
+            text = "📋  HISTORIA ZDARZEŃ"
+            isAllCaps = false
+            setTextColor(WHITE)
+            background = rounded(CARD, 14, BORDER)
+            setOnClickListener { showEventHistory() }
+        }
+        page.addView(historyButton, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
+
+        val diagnosticsButton = Button(this).apply {
+            text = "🩺  DIAGNOSTYKA SYSTEMU"
+            isAllCaps = false
+            setTextColor(WHITE)
+            background = rounded(CARD, 14, BORDER)
+            setOnClickListener { showDiagnostics() }
+        }
+        page.addView(diagnosticsButton, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) })
+
+        val exportButton = Button(this).apply {
+            text = "📤  EKSPORTUJ RAPORT CSV"
+            isAllCaps = false
+            setTextColor(WHITE)
+            background = rounded(CARD, 14, BORDER)
+            setOnClickListener { beginExport() }
+        }
+        page.addView(exportButton, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) })
+
         page.addView(text("Wskazówka: przetestuj alarm przed użyciem. Ta wersja wykrywa ruch tylko, gdy aplikacja pozostaje otwarta.", 12f, MUTED).apply {
             gravity = Gravity.CENTER
             setPadding(dp(4), dp(18), dp(4), 0)
@@ -296,6 +334,7 @@ class MainActivity : Activity(), SensorEventListener {
             return
         }
         alarmOn = false
+        EventLog.add(this, "ARM_REQUEST", "Rozpoczęto odliczanie do uzbrojenia")
         countdown = true
         countdownValue = 5
         updateStatus("PRZYGOTOWANIE", AMBER)
@@ -308,6 +347,7 @@ class MainActivity : Activity(), SensorEventListener {
         countdown = false
         armed = false
         alarmOn = false
+        EventLog.add(this, "DISARMED", "Alarm rozbrojony lub wyłączony")
         sensorManager.unregisterListener(this)
         tone.stopTone()
         (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel()
@@ -326,7 +366,10 @@ class MainActivity : Activity(), SensorEventListener {
             .setNegativeButton("Anuluj", null)
             .setPositiveButton("OK") { _, _ ->
                 if (field.text.toString() == pin) onSuccess()
-                else Toast.makeText(this, "Nieprawidłowy PIN.", Toast.LENGTH_SHORT).show()
+                else {
+                    EventLog.add(this, "PIN_FAILURE", "Nieprawidłowy PIN w AntiThiefPRO")
+                    Toast.makeText(this, "Nieprawidłowy PIN.", Toast.LENGTH_SHORT).show()
+                }
             }
             .show()
     }
@@ -345,6 +388,7 @@ class MainActivity : Activity(), SensorEventListener {
                     val value = field.text.toString()
                     if (value.length in 4..8 && value.all { it.isDigit() }) {
                         pin = value
+                        EventLog.add(this@MainActivity, "PIN_CHANGED", "Zmieniono PIN aplikacji")
                         getSharedPreferences("anti_thief", Context.MODE_PRIVATE).edit().putString("pin", pin).apply()
                         Toast.makeText(this, "PIN został zmieniony.", Toast.LENGTH_SHORT).show()
                     } else {
@@ -368,6 +412,7 @@ class MainActivity : Activity(), SensorEventListener {
         if (System.currentTimeMillis() - lastTrigger < 1500L) return
         lastTrigger = System.currentTimeMillis()
         alarmOn = true
+        EventLog.add(this, "MOTION_ALARM", "Wykryto ruch przekraczający ustawioną czułość")
         updateStatus("ALARM", RED)
         if (soundEnabled) handler.post(alarmTask)
         if (vibrationEnabled) {
@@ -378,6 +423,121 @@ class MainActivity : Activity(), SensorEventListener {
             } else {
                 @Suppress("DEPRECATION")
                 vibrator.vibrate(pattern, 0)
+            }
+        }
+    }
+
+
+    private fun showEventHistory() {
+        val events = EventLog.read(this).asReversed()
+        val content = if (events.isEmpty()) "Brak zapisanych zdarzeń." else
+            events.joinToString("\n\n") {
+                "\${EventLog.formattedTime(it.time)}\n\${it.type}: \${it.details}"
+            }
+        AlertDialog.Builder(this)
+            .setTitle("Historia zdarzeń (\${events.size})")
+            .setMessage(content)
+            .setPositiveButton("Zamknij", null)
+            .setNeutralButton("Wyczyść") { _, _ ->
+                AlertDialog.Builder(this)
+                    .setTitle("Wyczyścić historię?")
+                    .setMessage("Usunie to lokalny dziennik zdarzeń.")
+                    .setNegativeButton("Anuluj", null)
+                    .setPositiveButton("Wyczyść") { _, _ ->
+                        getSharedPreferences("anti_thief_event_log", MODE_PRIVATE).edit().clear().apply()
+                        EventLog.add(this, "HISTORY_CLEARED", "Historia została wyczyszczona")
+                        Toast.makeText(this, "Historia wyczyszczona.", Toast.LENGTH_SHORT).show()
+                    }.show()
+            }
+            .show()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun showDiagnostics() {
+        val sensorOk = accelerometer != null
+        val connected = try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.activeNetworkInfo?.isConnected == true
+        } catch (_: Exception) { false }
+        val storage = try {
+            val stats = StatFs(filesDir.absolutePath)
+            (stats.availableBytes / (1024 * 1024)).toString() + " MB wolnego miejsca"
+        } catch (_: Exception) { "Nie udało się odczytać" }
+        val version = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "nieznana"
+        } catch (_: Exception) { "nieznana" }
+        val adminActive = try {
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
+            dpm.isAdminActive(android.content.ComponentName(this, AntiThiefAdminReceiver::class.java))
+        } catch (_: Exception) { false }
+        val report = listOf(
+            "Wersja aplikacji: " + version,
+            "Android: " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")",
+            "Czujnik przyspieszenia: " + if (sensorOk) "dostępny" else "BRAK",
+            "Internet: " + if (connected) "połączony" else "brak połączenia",
+            "Pamięć aplikacji: " + storage,
+            "Administrator urządzenia: " + if (adminActive) "włączony" else "wyłączony",
+            "Historia zdarzeń: szyfrowana lokalnie",
+            "Monitoring ruchu: działa tylko, gdy aplikacja jest otwarta",
+            "Automatyczne zdjęcia, nagrywanie i wysyłanie lokalizacji: nieaktywne"
+        ).joinToString("\n\n")
+        AlertDialog.Builder(this)
+            .setTitle("Diagnostyka AntiThiefPRO")
+            .setMessage(report)
+            .setPositiveButton("OK", null)
+            .setNeutralButton(if (adminActive) "Wyłącz administratora" else "Aktywuj administratora") { _, _ ->
+                val component = android.content.ComponentName(this, AntiThiefAdminReceiver::class.java)
+                if (adminActive) {
+                    val intent = Intent(android.app.admin.DevicePolicyManager.ACTION_DEVICE_ADMIN_DISABLE_REQUESTED)
+                    intent.putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
+                    startActivity(intent)
+                } else {
+                    val intent = Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                    intent.putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
+                    intent.putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                        "AntiThiefPRO używa standardowego uprawnienia administratora Androida. Nie gwarantuje ono zablokowania odinstalowania aplikacji.")
+                    startActivity(intent)
+                }
+            }
+            .show()
+    }
+
+    private fun beginExport() {
+        val events = EventLog.read(this)
+        if (events.isEmpty()) {
+            Toast.makeText(this, "Historia jest pusta.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val rows = mutableListOf("timestamp,type,details")
+        events.forEach { event ->
+            fun quote(value: String): String = "\"" + value.replace("\"", "\"\"") + "\""
+            rows.add(quote(EventLog.formattedTime(event.time)) + "," + quote(event.type) + "," + quote(event.details))
+        }
+        pendingCsv = rows.joinToString("\r\n")
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/csv"
+            putExtra(Intent.EXTRA_TITLE, "AntiThiefPRO-raport.csv")
+        }
+        try {
+            startActivityForResult(intent, exportRequestCode)
+        } catch (_: Exception) {
+            Toast.makeText(this, "Nie można otworzyć okna zapisu pliku.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    @Deprecated("Deprecated in Android API; retained for compatibility without extra dependencies")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == exportRequestCode && resultCode == RESULT_OK && data?.data != null) {
+            try {
+                contentResolver.openOutputStream(data.data!!)?.use {
+                    it.write(pendingCsv.toByteArray(Charsets.UTF_8))
+                }
+                EventLog.add(this, "REPORT_EXPORTED", "Wyeksportowano historię do CSV")
+                Toast.makeText(this, "Raport zapisany.", Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) {
+                Toast.makeText(this, "Nie udało się zapisać raportu.", Toast.LENGTH_LONG).show()
             }
         }
     }
