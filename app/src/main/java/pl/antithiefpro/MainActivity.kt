@@ -432,10 +432,10 @@ class MainActivity : Activity(), SensorEventListener {
         val events = EventLog.read(this).asReversed()
         val content = if (events.isEmpty()) "Brak zapisanych zdarzeń." else
             events.joinToString("\n\n") {
-                "\${EventLog.formattedTime(it.time)}\n\${it.type}: \${it.details}"
+                "${EventLog.formattedTime(it.time)}\n${it.type}: ${it.details}"
             }
         AlertDialog.Builder(this)
-            .setTitle("Historia zdarzeń (\${events.size})")
+            .setTitle("Historia zdarzeń (${events.size})")
             .setMessage(content)
             .setPositiveButton("Zamknij", null)
             .setNeutralButton("Wyczyść") { _, _ ->
@@ -488,9 +488,8 @@ class MainActivity : Activity(), SensorEventListener {
             .setNeutralButton(if (adminActive) "Wyłącz administratora" else "Aktywuj administratora") { _, _ ->
                 val component = android.content.ComponentName(this, AntiThiefAdminReceiver::class.java)
                 if (adminActive) {
-                    val intent = Intent(android.app.admin.DevicePolicyManager.ACTION_DEVICE_ADMIN_DISABLE_REQUESTED)
-                    intent.putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
-                    startActivity(intent)
+                    startActivity(Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))
+                    Toast.makeText(this, "W ustawieniach otwórz aplikacje administratora urządzenia i wyłącz AntiThiefPRO przed odinstalowaniem.", Toast.LENGTH_LONG).show()
                 } else {
                     val intent = Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
                     intent.putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
