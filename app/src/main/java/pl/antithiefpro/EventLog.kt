@@ -57,6 +57,11 @@ object EventLog {
         }
     }
 
+    @Synchronized
+    fun clear(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(DATA_KEY).apply()
+    }
+
     fun formattedTime(time: Long): String =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(time))
 
