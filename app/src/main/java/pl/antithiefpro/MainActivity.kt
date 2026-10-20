@@ -1,6 +1,11 @@
 package pl.antithiefpro
 
 import android.Manifest
+import android.content.ContentValues
+import android.net.ConnectivityManager
+import android.os.BatteryManager
+import android.os.StatFs
+import android.provider.Settings
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.app.Activity
@@ -45,7 +50,13 @@ class MainActivity : Activity() {
     private lateinit var bottomNav: LinearLayout
     private var currentPage = "Główna"
     private val photoRequestCode = 520
+    private val videoRequestCode = 521
+    private val csvRequestCode = 522
+    private var pendingMediaUri: Uri? = null
     private var locationStatusView: TextView? = null
+    private var mediaFilter = "Wszystkie"
+    private var mediaSearch = ""
+    private var historySearch = ""
 
     private val bg = Color.rgb(11, 16, 25)
     private val panel = Color.rgb(18, 31, 44)
@@ -317,47 +328,137 @@ class MainActivity : Activity() {
 
     private fun photosPage() {
         pageContent.addView(pageHeading("Zdjęcia", "Fotografie zapisane w aplikacji", "▣", purple))
-        pageContent.addView(actionButton("Zrób zdjęcie", mint) {
-            try {
-                val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-                if (intent.resolveActivity(packageManager) != null) {
-                    startActivityForResult(intent, photoRequestCode)
-                } else {
-                    Toast.makeText(this, "Nie znaleziono aplikacji aparatu.", Toast.LENGTH_LONG).show()
-                }
-            } catch (_: Exception) {
-                Toast.makeText(this, "Nie udało się uruchomić aparatu.", Toast.LENGTH_LONG).show()
-            }
-        })
-        pageContent.addView(noteCard("Zdjęcia wykonane tutaj są zapisywane lokalnie. Automatyczne fotografowanie po błędnej próbie odblokowania nie jest jeszcze wdrożone."))
-        val directory = File(filesDir, "photos")
-        val photos = directory.listFiles()?.filter { it.isFile && it.extension.equals("jpg", true) }?.sortedByDescending { it.lastModified() }.orEmpty()
-        if (photos.isEmpty()) {
-            pageContent.addView(noteCard("Nie zapisano jeszcze żadnych zdjęć."))
-        } else {
-            photos.forEach { file ->
-                pageContent.addView(card(tile, 16, border).apply {
-                    val image = ImageView(this@MainActivity).apply {
-                        setImageBitmap(android.graphics.BitmapFactory.decodeFile(file.absolutePath))
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        adjustViewBounds = true
-                        maxHeight = dp(260)
-                    }
-                    addView(image)
-                    addView(label(SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(file.lastModified())), 12f, muted).apply { setPadding(0, dp(8), 0, dp(4)) })
-                    addView(actionButton("Usuń zdjęcie", red) {
-                        AlertDialog.Builder(this@MainActivity)
-                            .setTitle("Usunąć zdjęcie?")
-                            .setMessage("Tej czynności nie można cofnąć.")
-                            .setNegativeButton("Anuluj", null)
-                            .setPositiveButton("Usuń") { _, _ ->
-                                file.delete()
-                                showPage("Zdjęcia")
-                            }.show()
-                    })
-                })
-            }
+        pageContent.addView(actionButton("📷 Zrób zdjęcie", mint) { launchCapture(false) })
+        pageContent.addView(actionButton("🎥 Nagraj film", blue) { launchCapture(true) })
+        pageContent.addView(noteCard("Aparat i kamera uruchamiają się jawnie przez aplikację aparatu Androida. Materiały zapisują się w galerii telefonu."))
+        val filters = horizontal()
+        listOf("Wszystkie", "Zdjęcia", "Filmy").forEach { filter ->
+            filters.addView(actionButton(if (mediaFilter == filter) "✓ $filter" else filter, if (mediaFilter == filter) mint else blue) {
+                mediaFilter = filter; showPage("Zdjęcia")
+            }, weighted())
+            filters.addView(space(5))
         }
+        pageContent.addView(filters)
+        val search = EditText(this).apply {
+            setSingleLine(true); textSize = 14f; setTextColor(white); setHintTextColor(muted)
+            hint = "Szukaj po nazwie pliku"; setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = rounded(tile, 12, border); setText(mediaSearch)
+        }
+        pageContent.addView(search)
+        pageContent.addView(actionButton("Szukaj", purple) { mediaSearch = search.text.toString().trim(); showPage("Zdjęcia") })
+        val media = queryCapturedMedia().filter {
+            val kindOk = when (mediaFilter) { "Zdjęcia" -> !it.isVideo; "Filmy" -> it.isVideo; else -> true }
+            kindOk && it.name.contains(mediaSearch, true)
+        }
+        pageContent.addView(label("${media.size} materiałów", 12f, muted).apply { setPadding(0, dp(10), 0, dp(8)) })
+        if (media.isEmpty()) pageContent.addView(noteCard("Brak materiałów pasujących do filtra."))
+        media.forEach { item ->
+            pageContent.addView(card(tile, 16, border).apply {
+                addView(horizontal().apply {
+                    addView(label(if (item.isVideo) "▶" else "▣", 30f, if (item.isVideo) blue else mint, true).apply { setPadding(0, 0, dp(12), 0) })
+                    addView(vertical().apply {
+                        addView(label(item.name, 13f, white, true))
+                        addView(label("${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(item.dateSeconds * 1000))} · ${formatBytes(item.size)}", 11f, muted).apply { setPadding(0, dp(5), 0, 0) })
+                    }, weighted())
+                })
+                addView(actionButton("Otwórz", blue) { openMedia(item) })
+                addView(actionButton("Udostępnij", mint) { shareMedia(item) })
+                addView(actionButton("Usuń", red) {
+                    AlertDialog.Builder(this@MainActivity).setTitle("Usunąć materiał?")
+                        .setMessage(item.name).setNegativeButton("Anuluj", null)
+                        .setPositiveButton("Usuń") { _, _ ->
+                            contentResolver.delete(item.uri, null, null)
+                            EventLog.add(this@MainActivity, "MEDIA_DELETED", "Usunięto ${item.name}")
+                            showPage("Zdjęcia")
+                        }.show()
+                })
+            })
+        }
+    }
+
+    private data class CapturedMedia(val uri: Uri, val name: String, val dateSeconds: Long, val size: Long, val isVideo: Boolean)
+
+    private fun launchCapture(isVideo: Boolean) {
+        val collection = if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val kind = if (isVideo) "video" else "photo"
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, "AntiThiefPRO_${kind}_${System.currentTimeMillis()}.${if (isVideo) "mp4" else "jpg"}")
+            put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/mp4" else "image/jpeg")
+            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, if (isVideo) "Movies/AntiThiefPRO" else "Pictures/AntiThiefPRO")
+            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = try { contentResolver.insert(collection, values) } catch (_: Exception) { null }
+        if (uri == null) {
+            Toast.makeText(this, "Nie udało się przygotować pliku. Sprawdź wolne miejsce.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(if (isVideo) MediaStore.ACTION_VIDEO_CAPTURE else MediaStore.ACTION_IMAGE_CAPTURE).apply {
+            putExtra(MediaStore.EXTRA_OUTPUT, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            if (isVideo) putExtra(MediaStore.EXTRA_DURATION_LIMIT, 180)
+        }
+        if (intent.resolveActivity(packageManager) == null) {
+            contentResolver.delete(uri, null, null)
+            Toast.makeText(this, "Nie znaleziono zgodnej aplikacji aparatu.", Toast.LENGTH_LONG).show()
+            return
+        }
+        pendingMediaUri = uri
+        try { startActivityForResult(intent, if (isVideo) videoRequestCode else photoRequestCode) }
+        catch (_: Exception) {
+            contentResolver.delete(uri, null, null); pendingMediaUri = null
+            Toast.makeText(this, "Nie udało się uruchomić aparatu.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun queryCapturedMedia(): List<CapturedMedia> {
+        val result = mutableListOf<CapturedMedia>()
+        fun readCollection(collection: Uri, isVideo: Boolean) {
+            val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.RELATIVE_PATH)
+            try {
+                contentResolver.query(collection, projection, null, null, "${MediaStore.MediaColumns.DATE_ADDED} DESC")?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                    val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                    val pathCol = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+                    while (cursor.moveToNext()) {
+                        val name = cursor.getString(nameCol) ?: ""
+                        val path = if (pathCol >= 0) cursor.getString(pathCol).orEmpty() else ""
+                        if (!name.startsWith("AntiThiefPRO_") && !path.contains("AntiThiefPRO", true)) continue
+                        result.add(CapturedMedia(Uri.withAppendedPath(collection, cursor.getLong(idCol).toString()), name, cursor.getLong(dateCol), cursor.getLong(sizeCol), isVideo))
+                    }
+                }
+            } catch (_: Exception) { }
+        }
+        readCollection(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, false)
+        readCollection(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true)
+        return result.sortedByDescending { it.dateSeconds }
+    }
+
+    private fun openMedia(item: CapturedMedia) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(item.uri, if (item.isVideo) "video/*" else "image/*")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            })
+        } catch (_: Exception) { Toast.makeText(this, "Brak aplikacji do otwarcia tego pliku.", Toast.LENGTH_LONG).show() }
+    }
+
+    private fun shareMedia(item: CapturedMedia) {
+        try {
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                type = if (item.isVideo) "video/*" else "image/*"
+                putExtra(Intent.EXTRA_STREAM, item.uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }, "Udostępnij materiał"))
+        } catch (_: Exception) { Toast.makeText(this, "Nie udało się udostępnić pliku.", Toast.LENGTH_LONG).show() }
+    }
+
+    private fun formatBytes(bytes: Long): String = when {
+        bytes >= 1024L * 1024 * 1024 -> String.format(Locale.getDefault(), "%.1f GB", bytes / (1024.0 * 1024 * 1024))
+        bytes >= 1024L * 1024 -> String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024))
+        bytes >= 1024 -> String.format(Locale.getDefault(), "%.1f KB", bytes / 1024.0)
+        else -> "$bytes B"
     }
 
     private fun fetchLocation() {
