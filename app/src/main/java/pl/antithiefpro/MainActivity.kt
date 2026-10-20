@@ -1,9 +1,11 @@
 package pl.antithiefpro
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.os.StatFs
 import android.graphics.Color
@@ -99,6 +101,10 @@ class MainActivity : Activity(), SensorEventListener {
         buildUi()
         EventLog.add(this, "APP_START", "Otwarto AntiThiefPRO")
         updateStatus("ROZBROJONY", GREEN)
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7301)
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
