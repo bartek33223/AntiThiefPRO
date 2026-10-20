@@ -18,9 +18,9 @@ Darmowa aplikacja Android z alarmem ruchowym i lokalnymi narzędziami diagnostyc
 
 ## Budowanie APK
 
-Push do gałęzi `main` automatycznie uruchamia GitHub Actions. Po udanym buildzie otwórz kartę **Actions**, wybierz najnowsze udane uruchomienie i pobierz artefakt `AntiThiefPRO-debug`. Rozpakuj ZIP, aby uzyskać APK.
+Push do gałęzi `main` automatycznie uruchamia GitHub Actions. Po udanym buildzie otwórz kartę **Actions**, wybierz najnowsze udane uruchomienie i pobierz artefakt `AntiThiefPRO-v2.0-debug`. Rozpakuj ZIP, aby uzyskać APK.
 
-Artefakty kolejnych buildów są teraz przechowywane przez 1 dzień.
+Artefakty kolejnych buildów są teraz przechowywane przez 1 dzień. Starsze artefakty z wcześniejszych uruchomień nie są usuwane wstecz przez tę zmianę i mogą pozostać do upływu ich dotychczasowego terminu ważności.
 
 ## Ograniczenia i prywatność
 
