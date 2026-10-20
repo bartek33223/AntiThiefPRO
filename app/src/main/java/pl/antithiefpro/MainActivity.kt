@@ -437,32 +437,82 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun requestCsvExport() {
+        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/csv"
+            putExtra(Intent.EXTRA_TITLE, "AntiThiefPRO_historia.csv")
+        }, csvRequestCode)
+    }
+
     @Deprecated("Deprecated in Android API")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == photoRequestCode && resultCode == RESULT_OK) {
-            val bitmap = data?.extras?.get("data") as? Bitmap
-            if (bitmap == null) {
-                Toast.makeText(this, "Aparat nie zwrócił zdjęcia.", Toast.LENGTH_LONG).show()
-                return
-            }
-            try {
-                val directory = File(filesDir, "photos")
-                if (!directory.exists()) directory.mkdirs()
-                val filename = "photo_${System.currentTimeMillis()}.jpg"
-                FileOutputStream(File(directory, filename)).use { output ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)
-                }
-                Toast.makeText(this, "Zapisano zdjęcie.", Toast.LENGTH_SHORT).show()
+        if (requestCode == photoRequestCode || requestCode == videoRequestCode) {
+            val uri = pendingMediaUri
+            pendingMediaUri = null
+            if (uri != null) {
+                if (resultCode == RESULT_OK) {
+                    try {
+                        if (Build.VERSION.SDK_INT >= 29) {
+                            contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                        }
+                        EventLog.add(this, if (requestCode == videoRequestCode) "VIDEO_CAPTURED" else "PHOTO_CAPTURED", "Zapisano materiał: $uri")
+                        Toast.makeText(this, if (requestCode == videoRequestCode) "Zapisano film w galerii." else "Zapisano zdjęcie w galerii.", Toast.LENGTH_LONG).show()
+                    } catch (_: Exception) {
+                        Toast.makeText(this, "Nie udało się zaktualizować pliku.", Toast.LENGTH_LONG).show()
+                    }
+                } else contentResolver.delete(uri, null, null)
                 showPage("Zdjęcia")
-            } catch (_: Exception) {
-                Toast.makeText(this, "Nie udało się zapisać zdjęcia.", Toast.LENGTH_LONG).show()
             }
+        } else if (requestCode == csvRequestCode && resultCode == RESULT_OK && data?.data != null) {
+            try {
+                contentResolver.openOutputStream(data.data!!)?.bufferedWriter(Charsets.UTF_8)?.use { writer ->
+                    writer.write("czas;typ;szczegóły\n")
+                    EventLog.read(this).forEach { event ->
+                        val safeDetails = event.details.replace("\"","'").replace("\n", " ")
+                        writer.write("${EventLog.formattedTime(event.time)};${event.type};$safeDetails\n")
+                    }
+                }
+                Toast.makeText(this, "Wyeksportowano historię CSV.", Toast.LENGTH_LONG).show()
+            } catch (_: Exception) { Toast.makeText(this, "Nie udało się zapisać pliku CSV.", Toast.LENGTH_LONG).show() }
         }
     }
 
     private fun diagnosticsPage() {
         pageContent.addView(pageHeading("Diagnostyka", "Sprawdź gotowość urządzenia", "⬡", amber))
+        val battery = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = battery?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val batteryPercent = if (level >= 0 && scale > 0) "${level * 100 / scale}%" else "Brak danych"
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val connected = if (Build.VERSION.SDK_INT >= 23) cm.activeNetwork != null else @Suppress("DEPRECATION") (cm.activeNetworkInfo?.isConnected == true)
+        val freeBytes = StatFs(filesDir.absolutePath).availableBytes
+        val riskEvents = EventLog.read(this).takeLast(20).count { it.type.contains("FAILED") || it.type.contains("UNLOCK", true) }
+        val risk = when { riskEvents >= 8 -> "Wysokie"; riskEvents >= 3 -> "Podwyższone"; else -> "Niskie" }
+        pageContent.addView(moduleCard("◉", "Poziom ryzyka", risk, if (risk == "Wysokie") red else if (risk == "Podwyższone") amber else mint) { showPage("Historia") })
+        pageContent.addView(moduleCard("▤", "Wolne miejsce aplikacji", formatBytes(freeBytes), blue) { })
+        pageContent.addView(moduleCard("▰", "Bateria", batteryPercent, mint) { })
+        pageContent.addView(moduleCard("⌁", "Internet", if (connected) "Połączenie aktywne" else "Brak połączenia", if (connected) mint else amber) { })
+        pageContent.addView(moduleCard("⌘", "Debugowanie USB", if (Settings.Global.getInt(contentResolver, Settings.Global.ADB_ENABLED, 0) == 1) "Włączone" else "Wyłączone", amber) { })
+        pageContent.addView(moduleCard("⚙", "Opcje programistyczne", if (Settings.Global.getInt(contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1) "Włączone" else "Wyłączone", amber) { })
+        pageContent.addView(moduleCard("◷", "Automatyczna data i godzina", if (Settings.Global.getInt(contentResolver, Settings.Global.AUTO_TIME, 0) == 1) "Włączona" else "Wyłączona", blue) { })
+        pageContent.addView(actionButton("Zapisz zdarzenie testowe", purple) {
+            EventLog.add(this, "SAFE_TEST_EVENT", "Ręczny test działania aplikacji")
+            Toast.makeText(this, "Dodano testowe zdarzenie do historii.", Toast.LENGTH_SHORT).show()
+            showPage("Diagnostyka")
+        })
+        pageContent.addView(actionButton("Eksportuj historię CSV", mint) { requestCsvExport() })
+        pageContent.addView(actionButton("Usuń całą historię", red) {
+            AlertDialog.Builder(this).setTitle("Usunąć historię?")
+                .setMessage("Zostaną usunięte wszystkie lokalne wpisy dziennika.")
+                .setNegativeButton("Anuluj", null)
+                .setPositiveButton("Usuń") { _, _ ->
+                    EventLog.clear(this)
+                    EventLog.add(this, "HISTORY_CLEARED", "Historia została wyczyszczona ręcznie")
+                    showPage("Diagnostyka")
+                }.show()
+        })
         val checks = listOf(
             Triple("Administrator urządzenia", isAdminActive(), "Włącz obsługę administratora"),
             Triple("Aparat", hasPermission(Manifest.permission.CAMERA), "Nadaj uprawnienie aparatu"),
@@ -489,7 +539,15 @@ class MainActivity : Activity() {
 
     private fun historyPage() {
         pageContent.addView(pageHeading("Historia zdarzeń", "Wpisy zapisane lokalnie na urządzeniu", "◷", blue))
-        val events = EventLog.read(this).asReversed()
+        val search = EditText(this).apply {
+            setSingleLine(true); textSize = 14f; setTextColor(white); setHintTextColor(muted)
+            hint = "Szukaj w historii"; setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = rounded(tile, 12, border); setText(historySearch)
+        }
+        pageContent.addView(search)
+        pageContent.addView(actionButton("Filtruj", purple) { historySearch = search.text.toString().trim(); showPage("Historia") })
+        val allEvents = EventLog.read(this).asReversed()
+        val events = allEvents.filter { it.type.contains(historySearch, true) || it.details.contains(historySearch, true) }
         if (events.isEmpty()) {
             pageContent.addView(noteCard("Nie ma jeszcze żadnych zdarzeń w dzienniku."))
         } else {
@@ -498,9 +556,15 @@ class MainActivity : Activity() {
                     addView(label(EventLog.formattedTime(event.time), 11f, muted, true))
                     addView(label(event.type.replace('_', ' '), 15f, white, true).apply { setPadding(0, dp(6), 0, dp(4)) })
                     addView(label(event.details, 12f, muted))
+                    addView(actionButton("Oznacz jako fałszywy alarm", amber) {
+                        EventLog.add(this@MainActivity, "FALSE_ALARM_MARKED", "Oznaczono wpis ${EventLog.formattedTime(event.time)} (${event.type}) jako fałszywy alarm")
+                        Toast.makeText(this@MainActivity, "Dodano oznaczenie do historii.", Toast.LENGTH_SHORT).show()
+                        showPage("Historia")
+                    })
                 })
             }
         }
+        pageContent.addView(actionButton("Eksportuj historię CSV", mint) { requestCsvExport() })
         pageContent.addView(actionButton("Odśwież historię", blue) { showPage("Historia") })
     }
 
@@ -537,9 +601,12 @@ class MainActivity : Activity() {
 
     private fun profilesPage() {
         pageContent.addView(pageHeading("Profile ochrony", "Wybierz konfigurację dopasowaną do sytuacji", "⌁", amber))
-        listOf("Dom" to "Ustawienia dla zaufanej lokalizacji", "Poza domem" to "Rozszerzone monitorowanie", "Podróż" to "Dostęp do narzędzi odzyskiwania", "Maksymalna ochrona" to "Wszystkie dostępne kontrole").forEach { (name, desc) ->
-            pageContent.addView(moduleCard("◈", name, desc, if (name == "Maksymalna ochrona") mint else blue) {
-                Toast.makeText(this, "Profil „$name” będzie dostępny po wdrożeniu reguł automatyzacji.", Toast.LENGTH_SHORT).show()
+        val activeProfile = prefs.getString("active_profile", "Dom") ?: "Dom"
+        listOf("Dom" to "Ustawienia dla zaufanej lokalizacji", "Poza domem" to "Rozszerzone kontrole", "Podróż" to "Narzędzia odzyskiwania", "Maksymalna ochrona" to "Wszystkie dostępne kontrole").forEach { (name, desc) ->
+            pageContent.addView(moduleCard(if (activeProfile == name) "✓" else "◈", name, if (activeProfile == name) "AKTYWNY · $desc" else desc, if (activeProfile == name) mint else blue) {
+                prefs.edit().putString("active_profile", name).apply()
+                EventLog.add(this, "PROFILE_CHANGED", "Wybrano profil: $name")
+                showPage("Profile")
             })
         }
     }
