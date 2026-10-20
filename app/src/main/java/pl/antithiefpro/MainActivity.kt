@@ -2,7 +2,6 @@ package pl.antithiefpro
 
 import android.Manifest
 import android.content.ContentValues
-import android.content.ClipData
 import android.net.ConnectivityManager
 import android.os.BatteryManager
 import android.os.StatFs
@@ -28,6 +27,17 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.provider.MediaStore
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.MediaStoreOutputOptions
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.Recording
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -53,7 +63,8 @@ class MainActivity : Activity() {
     private val photoRequestCode = 520
     private val videoRequestCode = 521
     private val csvRequestCode = 522
-    private var pendingMediaUri: Uri? = null
+    private var activeRecording: Recording? = null
+    private var recordingInProgress = false
     private var locationStatusView: TextView? = null
     private var mediaFilter = "Wszystkie"
     private var mediaSearch = ""
@@ -329,9 +340,11 @@ class MainActivity : Activity() {
 
     private fun photosPage() {
         pageContent.addView(pageHeading("Zdjęcia", "Fotografie zapisane w aplikacji", "▣", purple))
-        pageContent.addView(actionButton("📷 Zrób zdjęcie", mint) { launchCapture(false) })
-        pageContent.addView(actionButton("🎥 Nagraj film", blue) { launchCapture(true) })
-        pageContent.addView(noteCard("Aparat i kamera uruchamiają się jawnie przez aplikację aparatu Androida. Materiały zapisują się w galerii telefonu."))
+        pageContent.addView(actionButton("📷 Zrób zdjęcie", mint) { capturePhotoInApp() })
+        pageContent.addView(actionButton(if (recordingInProgress) "■ Zatrzymaj nagrywanie" else "🎥 Nagraj film", blue) {
+            if (recordingInProgress) stopVideoRecording() else startVideoRecording()
+        })
+        pageContent.addView(noteCard("Zdjęcia i filmy są rejestrowane przez aparat wbudowany w AntiThiefPRO, bez otwierania osobnej aplikacji aparatu. Filmy są nagrywane bez dźwięku."))
         val filters = horizontal()
         listOf("Wszystkie", "Zdjęcia", "Filmy").forEach { filter ->
             filters.addView(actionButton(if (mediaFilter == filter) "✓ $filter" else filter, if (mediaFilter == filter) mint else blue) {
@@ -379,37 +392,101 @@ class MainActivity : Activity() {
 
     private data class CapturedMedia(val uri: Uri, val name: String, val dateSeconds: Long, val size: Long, val isVideo: Boolean)
 
-    private fun launchCapture(isVideo: Boolean) {
-        val collection = if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        val kind = if (isVideo) "video" else "photo"
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, "AntiThiefPRO_${kind}_${System.currentTimeMillis()}.${if (isVideo) "mp4" else "jpg"}")
-            put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/mp4" else "image/jpeg")
-            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, if (isVideo) "Movies/AntiThiefPRO" else "Pictures/AntiThiefPRO")
-        }
-        val uri = try { contentResolver.insert(collection, values) } catch (_: Exception) { null }
-        if (uri == null) {
-            Toast.makeText(this, "Nie udało się przygotować pliku. Sprawdź wolne miejsce.", Toast.LENGTH_LONG).show()
+    private fun cameraProvider(onReady: (ProcessCameraProvider) -> Unit) {
+        if (!hasPermission(Manifest.permission.CAMERA)) {
+            requestProtectionPermissions()
+            Toast.makeText(this, "Nadaj uprawnienie Aparat i spróbuj ponownie.", Toast.LENGTH_LONG).show()
             return
         }
-        val intent = Intent(if (isVideo) MediaStore.ACTION_VIDEO_CAPTURE else MediaStore.ACTION_IMAGE_CAPTURE).apply {
-            putExtra(MediaStore.EXTRA_OUTPUT, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            clipData = ClipData.newRawUri("AntiThiefPRO media", uri)
-            if (isVideo) putExtra(MediaStore.EXTRA_DURATION_LIMIT, 180)
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            try {
+                onReady(future.get())
+            } catch (e: Exception) {
+                Toast.makeText(this, "Nie udało się uruchomić kamery: ${e.localizedMessage ?: "błąd Androida"}", Toast.LENGTH_LONG).show()
+            }
+        }, mainExecutor)
+    }
+
+    private fun capturePhotoInApp() {
+        cameraProvider { provider ->
+            try {
+                provider.unbindAll()
+                val capture = ImageCapture.Builder()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    .build()
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, capture)
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "AntiThiefPRO_photo_${System.currentTimeMillis()}.jpg")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/AntiThiefPRO")
+                }
+                val output = ImageCapture.OutputFileOptions.Builder(
+                    contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+                ).build()
+                capture.takePicture(output, mainExecutor, object : ImageCapture.OnImageSavedCallback {
+                    override fun onImageSaved(result: ImageCapture.OutputFileResults) {
+                        EventLog.add(this@MainActivity, "PHOTO_CAPTURED", "Zrobiono zdjęcie: ${result.savedUri ?: "galeria AntiThiefPRO"}")
+                        Toast.makeText(this@MainActivity, "Zdjęcie zapisane w galerii.", Toast.LENGTH_LONG).show()
+                        showPage("Zdjęcia")
+                    }
+                    override fun onError(exception: ImageCaptureException) {
+                        Toast.makeText(this@MainActivity, "Nie udało się zrobić zdjęcia: ${exception.message}", Toast.LENGTH_LONG).show()
+                    }
+                })
+            } catch (e: Exception) {
+                Toast.makeText(this, "Błąd aparatu: ${e.localizedMessage ?: "nieznany"}", Toast.LENGTH_LONG).show()
+            }
         }
-        pendingMediaUri = uri
-        try {
-            startActivityForResult(intent, if (isVideo) videoRequestCode else photoRequestCode)
-        } catch (_: android.content.ActivityNotFoundException) {
-            contentResolver.delete(uri, null, null)
-            pendingMediaUri = null
-            Toast.makeText(this, "Telefon nie udostępnia aplikacji obsługującej aparat. Włącz aplikację Aparat w ustawieniach telefonu.", Toast.LENGTH_LONG).show()
-        } catch (_: Exception) {
-            contentResolver.delete(uri, null, null)
-            pendingMediaUri = null
-            Toast.makeText(this, "Android nie pozwolił otworzyć aparatu. Sprawdź uprawnienie Aparat w ustawieniach.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun startVideoRecording() {
+        cameraProvider { provider ->
+            try {
+                provider.unbindAll()
+                val recorder = Recorder.Builder()
+                    .setQualitySelector(QualitySelector.from(Quality.HD))
+                    .build()
+                val videoCapture = VideoCapture.withOutput(recorder)
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, videoCapture)
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "AntiThiefPRO_video_${System.currentTimeMillis()}.mp4")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                    if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, "Movies/AntiThiefPRO")
+                }
+                val output = MediaStoreOutputOptions.Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+                    .setContentValues(values).build()
+                activeRecording = recorder.prepareRecording(this, output).start(mainExecutor) { event ->
+                    when (event) {
+                        is VideoRecordEvent.Start -> {
+                            recordingInProgress = true
+                            EventLog.add(this, "VIDEO_RECORDING_STARTED", "Rozpoczęto nagrywanie filmu")
+                            showPage("Zdjęcia")
+                        }
+                        is VideoRecordEvent.Finalize -> {
+                            activeRecording = null
+                            recordingInProgress = false
+                            if (!event.hasError()) {
+                                EventLog.add(this, "VIDEO_CAPTURED", "Zapisano film w galerii")
+                                Toast.makeText(this, "Film zapisany w galerii.", Toast.LENGTH_LONG).show()
+                            } else {
+                                Toast.makeText(this, "Błąd zapisu filmu: ${event.error}", Toast.LENGTH_LONG).show()
+                            }
+                            showPage("Zdjęcia")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                activeRecording = null
+                recordingInProgress = false
+                Toast.makeText(this, "Nie udało się rozpocząć filmu: ${e.localizedMessage ?: "błąd kamery"}", Toast.LENGTH_LONG).show()
+            }
         }
+    }
+
+    private fun stopVideoRecording() {
+        activeRecording?.stop()
+        Toast.makeText(this, "Zatrzymywanie nagrania…", Toast.LENGTH_SHORT).show()
     }
 
     private fun queryCapturedMedia(): List<CapturedMedia> {
@@ -551,24 +628,7 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Android API")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == photoRequestCode || requestCode == videoRequestCode) {
-            val uri = pendingMediaUri
-            pendingMediaUri = null
-            if (uri != null) {
-                if (resultCode == RESULT_OK) {
-                    try {
-                        if (Build.VERSION.SDK_INT >= 29) {
-                            contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
-                        }
-                        EventLog.add(this, if (requestCode == videoRequestCode) "VIDEO_CAPTURED" else "PHOTO_CAPTURED", "Zapisano materiał: $uri")
-                        Toast.makeText(this, if (requestCode == videoRequestCode) "Zapisano film w galerii." else "Zapisano zdjęcie w galerii.", Toast.LENGTH_LONG).show()
-                    } catch (_: Exception) {
-                        Toast.makeText(this, "Nie udało się zaktualizować pliku.", Toast.LENGTH_LONG).show()
-                    }
-                } else contentResolver.delete(uri, null, null)
-                showPage("Zdjęcia")
-            }
-        } else if (requestCode == csvRequestCode && resultCode == RESULT_OK && data?.data != null) {
+        if (requestCode == csvRequestCode && resultCode == RESULT_OK && data?.data != null) {
             try {
                 contentResolver.openOutputStream(data.data!!)?.bufferedWriter(Charsets.UTF_8)?.use { writer ->
                     writer.write("czas;typ;szczegóły\n")
