@@ -9,28 +9,43 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.net.Uri
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Looper
+import android.provider.MediaStore
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("anti_thief_settings", Context.MODE_PRIVATE) }
     private lateinit var pageContent: LinearLayout
     private lateinit var bottomNav: LinearLayout
     private var currentPage = "Główna"
+    private val photoRequestCode = 520
+    private var locationStatusView: TextView? = null
 
     private val bg = Color.rgb(11, 16, 25)
     private val panel = Color.rgb(18, 31, 44)
@@ -120,9 +135,9 @@ class MainActivity : Activity() {
 
     private fun buildBottomNav() {
         bottomNav.removeAllViews()
-        val entries = listOf("Główna" to "⌂", "Historia" to "◷", "Mapa" to "⌖", "Ustawienia" to "⚙")
+        val entries = listOf("Główna" to "⌂", "Zdjęcia" to "▣", "Moduły" to "▦", "Historia" to "◷", "Ustawienia" to "⚙")
         entries.forEach { (name, symbol) ->
-            val selected = currentPage == name || (name == "Mapa" && currentPage == "Lokalizacja")
+            val selected = currentPage == name || (name == "Moduły" && currentPage in listOf("Lokalizacja", "Mapa", "Antykradzież", "Synchronizacja", "Diagnostyka", "Profile"))
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -131,7 +146,7 @@ class MainActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 isClickable = true
                 isFocusable = true
-                setOnClickListener { tapAnimation(this); showPage(if (name == "Mapa") "Lokalizacja" else name) }
+                setOnClickListener { tapAnimation(this); showPage(name) }
             }
             item.addView(label(symbol, 22f, if (selected) mint else muted, true).apply { gravity = Gravity.CENTER })
             item.addView(label(name, 10f, if (selected) mint else muted, true).apply {
@@ -150,6 +165,8 @@ class MainActivity : Activity() {
             "Główna" -> homePage()
             "Antykradzież" -> antiTheftPage()
             "Lokalizacja", "Mapa" -> locationPage()
+            "Zdjęcia" -> photosPage()
+            "Moduły" -> modulesPage()
             "Synchronizacja" -> syncPage()
             "Diagnostyka", "Testy" -> diagnosticsPage()
             "Historia" -> historyPage()
@@ -264,7 +281,10 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
                 setPadding(dp(8), 0, dp(8), dp(12))
             })
-            addView(actionButton("Sprawdź uprawnienia lokalizacji", purple) { requestProtectionPermissions() })
+            locationStatusView = label("Pozycja nie została jeszcze pobrana.", 12f, muted).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(12), dp(8), dp(8)) }
+            addView(locationStatusView)
+            addView(actionButton("Pobierz aktualną lokalizację", purple) { fetchLocation() })
+            addView(actionButton("Sprawdź uprawnienia", blue) { requestProtectionPermissions() })
         })
         pageContent.addView(moduleCard("◷", "Oś czasu incydentu", "Zdarzenia uporządkowane według czasu", blue) { showPage("Historia") })
     }
@@ -274,7 +294,171 @@ class MainActivity : Activity() {
         pageContent.addView(moduleCard("✉", "Adres odbiorcy", prefs.getString("recipient_email", "")?.ifBlank { "Nie skonfigurowano" } ?: "Nie skonfigurowano", blue) { showPage("Ustawienia") })
         pageContent.addView(moduleCard("☁", "Kolejka offline", "Moduł wysyłki oczekuje na implementację", mint) { showPage("Diagnostyka") })
         pageContent.addView(moduleCard("▣", "Google Drive", "Wymaga autoryzacji i konfiguracji", purple) { showPage("Ustawienia") })
-        pageContent.addView(noteCard("Wysyłka e-mail i synchronizacja z Google Drive nie są jeszcze aktywne."))
+        pageContent.addView(actionButton("Przygotuj raport e-mail", mint) { prepareEmailReport() })
+        pageContent.addView(noteCard("Raport otworzy się w aplikacji pocztowej. Wiadomość trzeba wysłać ręcznie. Automatyczna wysyłka w tle wymaga konfiguracji serwera poczty. Google Drive nie jest jeszcze podłączony."))
+    }
+
+    private fun modulesPage() {
+        pageContent.addView(pageHeading("Wszystkie moduły", "Każda funkcja w osobnym miejscu", "▦", mint))
+        val modules = listOf(
+            Triple("▣", "Zdjęcia", "Rób i przeglądaj zdjęcia") to "Zdjęcia",
+            Triple("⌖", "Lokalizacja", "Pobierz pozycję telefonu") to "Lokalizacja",
+            Triple("⌕", "Antykradzież", "Zdarzenia i reguły") to "Antykradzież",
+            Triple("✉", "E-mail i synchronizacja", "Przygotuj raport") to "Synchronizacja",
+            Triple("◷", "Historia", "Zapisane zdarzenia") to "Historia",
+            Triple("⬡", "Diagnostyka", "Uprawnienia i stan") to "Diagnostyka",
+            Triple("⌁", "Profile ochrony", "Konfiguracje ochrony") to "Profile",
+            Triple("⚙", "Ustawienia", "Adres e-mail i uprawnienia") to "Ustawienia"
+        )
+        modules.forEach { (item, destination) ->
+            pageContent.addView(moduleCard(item.first, item.second, item.third, blue) { showPage(destination) })
+        }
+    }
+
+    private fun photosPage() {
+        pageContent.addView(pageHeading("Zdjęcia", "Fotografie zapisane w aplikacji", "▣", purple))
+        pageContent.addView(actionButton("Zrób zdjęcie", mint) {
+            try {
+                val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                if (intent.resolveActivity(packageManager) != null) {
+                    startActivityForResult(intent, photoRequestCode)
+                } else {
+                    Toast.makeText(this, "Nie znaleziono aplikacji aparatu.", Toast.LENGTH_LONG).show()
+                }
+            } catch (_: Exception) {
+                Toast.makeText(this, "Nie udało się uruchomić aparatu.", Toast.LENGTH_LONG).show()
+            }
+        })
+        pageContent.addView(noteCard("Zdjęcia wykonane tutaj są zapisywane lokalnie. Automatyczne fotografowanie po błędnej próbie odblokowania nie jest jeszcze wdrożone."))
+        val directory = File(filesDir, "photos")
+        val photos = directory.listFiles()?.filter { it.isFile && it.extension.equals("jpg", true) }?.sortedByDescending { it.lastModified() }.orEmpty()
+        if (photos.isEmpty()) {
+            pageContent.addView(noteCard("Nie zapisano jeszcze żadnych zdjęć."))
+        } else {
+            photos.forEach { file ->
+                pageContent.addView(card(tile, 16, border).apply {
+                    val image = ImageView(this@MainActivity).apply {
+                        setImageBitmap(android.graphics.BitmapFactory.decodeFile(file.absolutePath))
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        adjustViewBounds = true
+                        maxHeight = dp(260)
+                    }
+                    addView(image)
+                    addView(label(SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(file.lastModified())), 12f, muted).apply { setPadding(0, dp(8), 0, dp(4)) })
+                    addView(actionButton("Usuń zdjęcie", red) {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Usunąć zdjęcie?")
+                            .setMessage("Tej czynności nie można cofnąć.")
+                            .setNegativeButton("Anuluj", null)
+                            .setPositiveButton("Usuń") { _, _ ->
+                                file.delete()
+                                showPage("Zdjęcia")
+                            }.show()
+                    })
+                })
+            }
+        }
+    }
+
+    private fun fetchLocation() {
+        if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) &&
+            !hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)) {
+            requestProtectionPermissions()
+            locationStatusView?.text = "Nadaj uprawnienie lokalizacji, a następnie spróbuj ponownie."
+            return
+        }
+        try {
+            val manager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                .filter { manager.isProviderEnabled(it) }
+            if (providers.isEmpty()) {
+                locationStatusView?.text = "Włącz lokalizację w ustawieniach telefonu."
+                return
+            }
+            var last: Location? = null
+            for (provider in providers) {
+                try {
+                    val candidate = manager.getLastKnownLocation(provider)
+                    if (candidate != null && (last == null || candidate.time > last!!.time)) last = candidate
+                } catch (_: SecurityException) { }
+            }
+            if (last != null) {
+                showLocation(last!!)
+                return
+            }
+            locationStatusView?.text = "Pobieranie pozycji… poczekaj chwilę."
+            val listener = object : LocationListener {
+                override fun onLocationChanged(location: Location) {
+                    try { manager.removeUpdates(this) } catch (_: Exception) { }
+                    showLocation(location)
+                }
+            }
+            var registered = false
+            for (provider in providers) {
+                try {
+                    manager.requestLocationUpdates(provider, 1000L, 0f, listener, Looper.getMainLooper())
+                    registered = true
+                } catch (_: SecurityException) { }
+            }
+            if (!registered) locationStatusView?.text = "Nie udało się rozpocząć pobierania lokalizacji."
+            Toast.makeText(this, "Czekam na pozycję GPS lub sieciową.", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            locationStatusView?.text = "Błąd pobierania lokalizacji. Sprawdź ustawienia telefonu."
+        }
+    }
+
+    private fun showLocation(location: Location) {
+        val accuracy = if (location.hasAccuracy()) "\nDokładność: około ${location.accuracy.toInt()} m" else ""
+        locationStatusView?.text = "Szerokość: ${location.latitude}\nDługość: ${location.longitude}$accuracy"
+        EventLog.add(this, "LOCATION_READ", "Pobrano pozycję: ${location.latitude}, ${location.longitude}")
+    }
+
+    private fun prepareEmailReport() {
+        val recipient = prefs.getString("recipient_email", "")?.trim().orEmpty()
+        if (recipient.isBlank()) {
+            Toast.makeText(this, "Najpierw zapisz adres odbiorcy w Ustawieniach.", Toast.LENGTH_LONG).show()
+            showPage("Ustawienia")
+            return
+        }
+        val events = EventLog.read(this).takeLast(30).joinToString("\n") {
+            "${EventLog.formattedTime(it.time)} | ${it.type} | ${it.details}"
+        }.ifBlank { "Brak zapisanych zdarzeń." }
+        val body = "Raport AntiThiefPRO\nUrządzenie: ${Build.MANUFACTURER} ${Build.MODEL}\n\nOstatnie zdarzenia:\n$events"
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("mailto:")
+            putExtra(Intent.EXTRA_EMAIL, arrayOf(recipient))
+            putExtra(Intent.EXTRA_SUBJECT, "Raport AntiThiefPRO")
+            putExtra(Intent.EXTRA_TEXT, body)
+        }
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(this, "Brak aplikacji pocztowej obsługującej wysyłanie e-mail.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    @Deprecated("Deprecated in Android API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == photoRequestCode && resultCode == RESULT_OK) {
+            val bitmap = data?.extras?.get("data") as? Bitmap
+            if (bitmap == null) {
+                Toast.makeText(this, "Aparat nie zwrócił zdjęcia.", Toast.LENGTH_LONG).show()
+                return
+            }
+            try {
+                val directory = File(filesDir, "photos")
+                if (!directory.exists()) directory.mkdirs()
+                val filename = "photo_${System.currentTimeMillis()}.jpg"
+                FileOutputStream(File(directory, filename)).use { output ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)
+                }
+                Toast.makeText(this, "Zapisano zdjęcie.", Toast.LENGTH_SHORT).show()
+                showPage("Zdjęcia")
+            } catch (_: Exception) {
+                Toast.makeText(this, "Nie udało się zapisać zdjęcia.", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun diagnosticsPage() {
