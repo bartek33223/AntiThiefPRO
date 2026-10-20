@@ -8,7 +8,7 @@ import android.os.StatFs
 import android.provider.Settings
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
-import android.app.Activity
+import androidx.activity.ComponentActivity
 import android.app.AlertDialog
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
@@ -55,7 +55,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("anti_thief_settings", Context.MODE_PRIVATE) }
     private lateinit var pageContent: LinearLayout
     private lateinit var bottomNav: LinearLayout
