@@ -30,6 +30,7 @@ import android.provider.MediaStore
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.UseCase
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
@@ -415,7 +416,7 @@ class MainActivity : Activity() {
                 val capture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                     .build()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, capture)
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, *arrayOf<UseCase>(capture))
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, "AntiThiefPRO_photo_${System.currentTimeMillis()}.jpg")
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -448,7 +449,7 @@ class MainActivity : Activity() {
                     .setQualitySelector(QualitySelector.from(Quality.HD))
                     .build()
                 val videoCapture = VideoCapture.withOutput(recorder)
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, videoCapture)
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, *arrayOf<UseCase>(videoCapture))
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, "AntiThiefPRO_video_${System.currentTimeMillis()}.mp4")
                     put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
