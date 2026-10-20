@@ -1,22 +1,49 @@
-# AntiThiefPRO
+# AntiThiefPRO 2.0
 
-Free, open-source Android motion alarm.
+Darmowa aplikacja Android z alarmem ruchowym i lokalnymi narzędziami diagnostycznymi.
 
-## Build the APK
+## Funkcje
 
-Push to `main` or run **Build AntiThiefPRO APK** in the Actions tab. Download the `AntiThiefPRO-debug` artifact from a successful run and extract the ZIP to get the APK.
+- Alarm ruchowy z 5-sekundowym odliczaniem.
+- Regulowana czułość czujnika przyspieszenia.
+- Oddzielne ustawienia dźwięku i wibracji.
+- PIN aplikacji do rozbrajania alarmu i zmiany ustawień PIN.
+- Historia zdarzeń z limitem 200 wpisów.
+- Szyfrowanie lokalnej historii algorytmem AES-GCM z kluczem przechowywanym w Android Keystore.
+- Zdarzenie w historii po restarcie Androida, jeśli system dostarczy odbiorcy chroniony broadcast.
+- Ekran diagnostyczny: wersja, Android/API, czujnik ruchu, połączenie sieciowe, wolne miejsce i status administratora urządzenia.
+- Eksport historii do pliku CSV.
+- Opcjonalna, standardowa zgoda administratora urządzenia Android. Nie gwarantuje ona blokady odinstalowania: administratora można wyłączyć w ustawieniach systemu.
+- Brak reklam, analityki i wysyłania danych do zewnętrznych serwerów.
 
-## Version 1.1
+## Budowanie APK
 
-- Redesigned dark interface with status panel and clearer controls.
-- Five-second arming countdown so you can put the phone down.
-- Adjustable motion sensitivity.
-- Separate sound and vibration switches.
-- Repeating alarm tone and vibration until disarmed.
-- PIN-protected disarming and PIN change.
-- Settings are saved on the device.
-- No account, ads, analytics, or network permission.
+Push do gałęzi `main` automatycznie uruchamia GitHub Actions. Po udanym buildzie otwórz kartę **Actions**, wybierz najnowsze udane uruchomienie i pobierz artefakt `AntiThiefPRO-debug`. Rozpakuj ZIP, aby uzyskać APK.
 
-## Limitations
+Artefakty kolejnych buildów są teraz przechowywane przez 1 dzień.
 
-Motion monitoring only works while the app remains open. It does not protect the phone after the app is closed or Android stops it. Default PIN is `1234`; change it before use. This is a debug APK for testing, not a Play Store release.
+## Ograniczenia i prywatność
+
+- Alarm ruchowy działa tylko, gdy aplikacja pozostaje otwarta. Ta wersja nie utrzymuje stałego monitorowania ruchu w tle.
+- Android nie udostępnia zwykłym aplikacjom uniwersalnego dostępu do każdej nieudanej próby wpisania kodu blokady.
+- Automatyczne fotografowanie, nagrywanie i wysyłanie lokalizacji nie są włączone.
+- Historia jest szyfrowana lokalnie; eksport CSV zapisuje czytelny plik w lokalizacji wybranej przez użytkownika.
+- Domyślny PIN to `1234`. Zmień go przed użyciem.
+- To debug APK do testów, nie wersja ze sklepu Google Play.
+
+## Historia zmian
+
+### 2.0
+- Dodano szyfrowaną lokalną historię zdarzeń.
+- Dodano ekran diagnostyczny.
+- Dodano eksport historii do CSV.
+- Dodano zapis zdarzenia restartu systemu.
+- Dodano opcjonalną aktywację administratora urządzenia Android.
+- Zmieniono retencję nowych artefaktów buildów na 1 dzień.
+
+### 1.1
+- Przeprojektowany ciemny interfejs.
+- Odliczanie przed uzbrojeniem.
+- Regulowana czułość czujnika.
+- Oddzielne przełączniki dźwięku i wibracji.
+- PIN i zapis ustawień na urządzeniu.
