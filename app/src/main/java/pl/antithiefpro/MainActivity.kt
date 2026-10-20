@@ -2,6 +2,7 @@ package pl.antithiefpro
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.ClipData
 import android.net.ConnectivityManager
 import android.os.BatteryManager
 import android.os.StatFs
@@ -385,7 +386,6 @@ class MainActivity : Activity() {
             put(MediaStore.MediaColumns.DISPLAY_NAME, "AntiThiefPRO_${kind}_${System.currentTimeMillis()}.${if (isVideo) "mp4" else "jpg"}")
             put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/mp4" else "image/jpeg")
             if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, if (isVideo) "Movies/AntiThiefPRO" else "Pictures/AntiThiefPRO")
-            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val uri = try { contentResolver.insert(collection, values) } catch (_: Exception) { null }
         if (uri == null) {
@@ -395,18 +395,20 @@ class MainActivity : Activity() {
         val intent = Intent(if (isVideo) MediaStore.ACTION_VIDEO_CAPTURE else MediaStore.ACTION_IMAGE_CAPTURE).apply {
             putExtra(MediaStore.EXTRA_OUTPUT, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            clipData = ClipData.newRawUri("AntiThiefPRO media", uri)
             if (isVideo) putExtra(MediaStore.EXTRA_DURATION_LIMIT, 180)
         }
-        if (intent.resolveActivity(packageManager) == null) {
-            contentResolver.delete(uri, null, null)
-            Toast.makeText(this, "Nie znaleziono zgodnej aplikacji aparatu.", Toast.LENGTH_LONG).show()
-            return
-        }
         pendingMediaUri = uri
-        try { startActivityForResult(intent, if (isVideo) videoRequestCode else photoRequestCode) }
-        catch (_: Exception) {
-            contentResolver.delete(uri, null, null); pendingMediaUri = null
-            Toast.makeText(this, "Nie udało się uruchomić aparatu.", Toast.LENGTH_LONG).show()
+        try {
+            startActivityForResult(intent, if (isVideo) videoRequestCode else photoRequestCode)
+        } catch (_: android.content.ActivityNotFoundException) {
+            contentResolver.delete(uri, null, null)
+            pendingMediaUri = null
+            Toast.makeText(this, "Telefon nie udostępnia aplikacji obsługującej aparat. Włącz aplikację Aparat w ustawieniach telefonu.", Toast.LENGTH_LONG).show()
+        } catch (_: Exception) {
+            contentResolver.delete(uri, null, null)
+            pendingMediaUri = null
+            Toast.makeText(this, "Android nie pozwolił otworzyć aparatu. Sprawdź uprawnienie Aparat w ustawieniach.", Toast.LENGTH_LONG).show()
         }
     }
 
