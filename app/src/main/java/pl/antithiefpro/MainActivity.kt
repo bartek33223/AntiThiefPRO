@@ -20,6 +20,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -30,6 +31,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var navigation: LinearLayout
     private var page = "Pulpit"
     private var cameraBusy = false
+    private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) takePhoto() else toast("Bez dostępu do aparatu zdjęcie nie powstanie.")
+    }
 
     private val background = Color.rgb(8, 13, 25)
     private val surface = Color.rgb(17, 26, 44)
@@ -58,7 +62,7 @@ class MainActivity : ComponentActivity() {
         }
         header.addView(label("A", 23f, mint, true).apply {
             gravity = Gravity.CENTER
-            background = rounded(Color.rgb(18, 66, 61), 18)
+            setBackground(rounded(Color.rgb(18, 66, 61), 18))
             layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
         })
         header.addView(LinearLayout(this).apply {
@@ -70,7 +74,7 @@ class MainActivity : ComponentActivity() {
         })
         header.addView(label("●", 15f, mint, true).apply {
             gravity = Gravity.CENTER
-            background = rounded(raised, 15)
+            setBackground(rounded(raised, 15))
             layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
         })
         root.addView(header)
@@ -87,7 +91,7 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dp(6), dp(6), dp(6), dp(6))
-            background = rounded(Color.rgb(13, 21, 36), 20)
+            setBackground(rounded(Color.rgb(13, 21, 36), 20))
         }
         root.addView(LinearLayout(this).apply {
             setPadding(dp(9), dp(2), dp(9), dp(9))
@@ -107,7 +111,7 @@ class MainActivity : ComponentActivity() {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 setPadding(dp(3), dp(8), dp(3), dp(8))
-                background = rounded(if (selected) Color.rgb(22, 58, 54) else Color.TRANSPARENT, 14)
+                setBackground(rounded(if (selected) Color.rgb(22, 58, 54) else Color.TRANSPARENT, 14))
                 layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                 setOnClickListener { render(item.first) }
                 addView(label(item.second, 20f, if (selected) mint else muted, true).apply { gravity = Gravity.CENTER })
@@ -200,7 +204,7 @@ class MainActivity : ComponentActivity() {
             addView(label(if (enabled) "Administrator urządzenia jest włączony." else "Włącz administratora, aby Android mógł przekazywać aplikacji informacje o nieudanych próbach.", 15f, ink, true).apply { setPadding(0, dp(12), 0, dp(8)) })
             addView(primaryButton(if (enabled) "OTWÓRZ USTAWIENIA ADMINISTRATORA" else "AKTYWUJ ADMINISTRATORA", if (enabled) blue else mint) {
                 try {
-                    val component = ComponentName(this, AntiThiefAdminReceiver::class.java)
+                    val component = ComponentName(this@MainActivity, AntiThiefAdminReceiver::class.java)
                     val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
                         .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
                         .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "AntiThiefPRO rejestruje nieudane próby odblokowania telefonu.")
@@ -220,11 +224,11 @@ class MainActivity : ComponentActivity() {
         card {
             addView(label("${events.size} / 200 zdarzeń", 13f, muted, true))
             addView(primaryButton("WYCZYŚĆ HISTORIĘ", red) {
-                android.app.AlertDialog.Builder(this)
+                android.app.AlertDialog.Builder(this@MainActivity)
                     .setTitle("Wyczyścić historię?")
                     .setMessage("Ta operacja usunie lokalny dziennik zdarzeń.")
                     .setNegativeButton("Anuluj", null)
-                    .setPositiveButton("Wyczyść") { _, _ -> EventLog.clear(this); render("Historia") }
+                    .setPositiveButton("Wyczyść") { _, _ -> EventLog.clear(this@MainActivity); render("Historia") }
                     .show()
             })
         }
@@ -258,7 +262,7 @@ class MainActivity : ComponentActivity() {
     private fun takePhoto() {
         if (cameraBusy) return
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.CAMERA), 610)
+            cameraPermission.launch(Manifest.permission.CAMERA)
             return
         }
         cameraBusy = true
@@ -298,11 +302,6 @@ class MainActivity : ComponentActivity() {
         }, mainExecutor)
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 610 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) takePhoto()
-        else if (requestCode == 610) toast("Bez dostępu do aparatu zdjęcie nie powstanie.")
-    }
 
     private fun adminEnabled(): Boolean {
         val manager = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
@@ -338,7 +337,7 @@ class MainActivity : ComponentActivity() {
     private fun metric(value: String, caption: String, color: Int): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(10), dp(12), dp(6), dp(12))
-        background = rounded(raised, 13)
+        setBackground(rounded(raised, 13))
         addView(label(value, 21f, color, true))
         addView(label(caption, 9f, muted).apply { setPadding(0, dp(3), 0, 0) })
     }
@@ -356,7 +355,7 @@ class MainActivity : ComponentActivity() {
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(15), dp(12), dp(15))
-            background = rounded(surface, 18, border)
+            setBackground(rounded(surface, 18, border))
             setOnClickListener { action() }
             addView(label(symbol, 23f, color, true))
             addView(label(title, 14f, ink, true).apply { setPadding(0, dp(12), 0, dp(3)) })
@@ -377,7 +376,7 @@ class MainActivity : ComponentActivity() {
         label(caption, 11f, background, true).apply {
             gravity = Gravity.CENTER
             setPadding(dp(13), dp(14), dp(13), dp(14))
-            background = rounded(color, 13)
+            setBackground(rounded(color, 13))
             setOnClickListener { action() }
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(13) }
         }
@@ -386,7 +385,7 @@ class MainActivity : ComponentActivity() {
         val view = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(16), dp(16), dp(16))
-            background = rounded(surface, 20, border)
+            setBackground(rounded(surface, 20, border))
             block()
         }
         content.addView(view, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
