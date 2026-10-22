@@ -22,7 +22,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android SDK platform 37
+      - name: Install Android SDK platform 36
         shell: bash
         run: |
           set -eu
@@ -36,7 +36,7 @@ jobs:
             exit 1
           fi
           yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null || true
-          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-37" "build-tools;36.0.0"
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up Gradle 9.7.1
         uses: gradle/actions/setup-gradle@v6

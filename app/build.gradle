@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace 'pl.antithiefpro'
-    compileSdk 37
+    compileSdk 36
 
     defaultConfig {
         applicationId 'pl.antithiefpro'
