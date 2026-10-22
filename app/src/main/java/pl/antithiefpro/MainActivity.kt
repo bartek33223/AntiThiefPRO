@@ -21,6 +21,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -292,7 +293,7 @@ class MainActivity : ComponentActivity() {
                 val output = ImageCapture.OutputFileOptions.Builder(
                     contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
                 ).build()
-                capture.takePicture(output, mainExecutor, object : ImageCapture.OnImageSavedCallback {
+                capture.takePicture(output, ContextCompat.getMainExecutor(this@MainActivity), object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(result: ImageCapture.OutputFileResults) {
                         cameraBusy = false
                         EventLog.add(this@MainActivity, "PHOTO_CAPTURED", "Zapisano zdjęcie aparatem aplikacji")
@@ -308,7 +309,7 @@ class MainActivity : ComponentActivity() {
                 cameraBusy = false
                 toast("Aparat niedostępny: ${e.message ?: "nieznany błąd"}")
             }
-        }, mainExecutor)
+        }, ContextCompat.getMainExecutor(this@MainActivity))
     }
 
 
