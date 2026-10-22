@@ -23,4 +23,4 @@ Każdy push do gałęzi main uruchamia workflow GitHub Actions. Po udanym buildz
 
 ## Narzędzia kompilacji
 
-Workflow korzysta ze stabilnych wydań akcji GitHub działających na Node.js 24, Gradle 9.7.1, Android Gradle Plugin 9.3.3, Kotlin 2.4.21, Activity 1.13.0, Core 1.19.1 i CameraX 1.6.2. Kompilacja używa JDK 17, Android SDK API 36 i celu aplikacji API 36.
+Workflow korzysta ze stabilnych wydań akcji GitHub działających na Node.js 24, Gradle 9.7.1, Android Gradle Plugin 9.3.3, Kotlin 2.4.21, Activity 1.13.0, Core 1.18.0 i CameraX 1.6.2. Kompilacja używa JDK 17, Android SDK API 36 i celu aplikacji API 36.
