@@ -10,17 +10,18 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 is pinned so the runner image does not change unexpectedly.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
       - name: Set up Gradle 8.7
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.7'
       - name: Build debug APK
