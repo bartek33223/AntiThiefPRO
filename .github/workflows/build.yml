@@ -35,7 +35,7 @@ jobs:
             echo "Nie znaleziono sdkmanager w Android SDK."
             exit 1
           fi
-          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null || true
           "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-37" "build-tools;36.0.0"
 
       - name: Set up Gradle 9.7.1
